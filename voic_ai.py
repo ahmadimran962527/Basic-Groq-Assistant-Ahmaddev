@@ -34,12 +34,38 @@ MODELS = [
 client        = None
 current_model = None  # set after tk.Tk() is created
 
-# ---------------- TTS ----------------
+# ---------------- TTS ENGINE (global, reusable) ----------------
+tts_engine  = None
+stop_flag   = threading.Event()   # set this to interrupt speaking
+
 def speak(text):
-    engine = pyttsx3.init()
-    engine.say(text)
-    engine.runAndWait()
-    engine.stop()
+    global tts_engine
+    stop_flag.clear()                        # reset stop flag before speaking
+
+    tts_engine = pyttsx3.init()
+    tts_engine.say(text)
+
+    # run in small steps so we can check stop_flag
+    tts_engine.startLoop(False)
+    while tts_engine.isBusy():
+        if stop_flag.is_set():               # user pressed Stop
+            tts_engine.stop()
+            break
+        tts_engine.iterate()
+    tts_engine.endLoop()
+    tts_engine = None
+
+def stop_speaking():
+    """Called when user clicks the Stop button."""
+    stop_flag.set()
+    if tts_engine:
+        try:
+            tts_engine.stop()
+        except:
+            pass
+    set_status("⏹  Stopped", RED)
+    # re-enable stop btn appearance after a moment
+    window.after(800, lambda: set_status("●  Ready", TEXT_SEC))
 
 # ---------------- RECORD AUDIO ----------------
 def record_audio(seconds=5, fs=44100):
@@ -118,15 +144,20 @@ def send_to_ai(user_text):
         )
         reply = response.choices[0].message.content
         add_message("ai", reply)
-        set_status("🔊  Speaking...", ACCENT2)
-        speak(reply)
+        # only speak if user hasn't pressed stop
+        if not stop_flag.is_set():
+            set_status("🔊  Speaking...", ACCENT2)
+            window.after(0, lambda: stop_btn.config(state=tk.NORMAL))
+            speak(reply)
+            window.after(0, lambda: stop_btn.config(state=tk.DISABLED))
     except Exception as e:
         add_error(str(e))
-    set_status("●  Ready", TEXT_SEC)
+    if not stop_flag.is_set():
+        set_status("●  Ready", TEXT_SEC)
 
 # ---------------- VOICE ----------------
 def process_voice():
-    mic_btn.config(state=tk.DISABLED)
+    window.after(0, lambda: mic_btn.config(state=tk.DISABLED))
     user_text = record_audio()
     if not user_text:
         add_error("Could not understand. Try again.")
@@ -137,6 +168,7 @@ def process_voice():
     window.after(0, lambda: mic_btn.config(state=tk.NORMAL))
 
 def start_voice():
+    stop_flag.clear()   # clear any previous stop before new request
     threading.Thread(target=process_voice, daemon=True).start()
 
 # ---------------- KEYBOARD ----------------
@@ -145,6 +177,7 @@ def process_text(event=None):
     if not user_text:
         return
     text_entry.delete(0, tk.END)
+    stop_flag.clear()   # clear any previous stop before new request
     threading.Thread(target=send_to_ai, args=(user_text,), daemon=True).start()
 
 # ================================================================
@@ -178,13 +211,11 @@ def open_model_picker():
                        bg=row_bg, fg=row_fg,
                        anchor=tk.W, padx=14, pady=11)
         lbl.pack(fill=tk.X)
-
         tk.Frame(popup, bg=BORDER, height=1).pack(fill=tk.X)
 
         def make_select(api=api_name, dname=display_name):
             def _select(e=None):
                 current_model.set(api)
-                # update the header button label
                 model_btn.config(text=f"⚙  {dname}  ▾")
                 popup.destroy()
                 add_system_note(f"Switched to  {dname}")
@@ -305,7 +336,7 @@ def build_key_screen():
 #  MAIN CHAT UI
 # ================================================================
 def launch_main_ui():
-    global chat_box, status_label, text_entry, mic_btn, model_btn
+    global chat_box, status_label, text_entry, mic_btn, model_btn, stop_btn
 
     for w in window.winfo_children():
         w.destroy()
@@ -321,7 +352,6 @@ def launch_main_ui():
                              bg=SURFACE, fg=TEXT_SEC)
     status_label.pack(side=tk.RIGHT, padx=16)
 
-    # Model button — shows current model name, click to open picker
     initial_label = next(n for n, a in MODELS if a == current_model.get())
     model_btn = tk.Button(
         header,
@@ -329,10 +359,8 @@ def launch_main_ui():
         font=label_font,
         bg=ENTRY_BG, fg=ACCENT2,
         activebackground=BORDER, activeforeground=ACCENT2,
-        relief=tk.FLAT, bd=0,
-        padx=10, pady=6,
-        cursor="hand2",
-        command=open_model_picker,
+        relief=tk.FLAT, bd=0, padx=10, pady=6,
+        cursor="hand2", command=open_model_picker,
     )
     model_btn.pack(side=tk.RIGHT, padx=(0, 6))
 
@@ -384,6 +412,15 @@ def launch_main_ui():
               relief=tk.FLAT, bd=0, padx=14, pady=8,
               cursor="hand2", command=process_text).pack(side=tk.LEFT)
 
+    # ⏹ Stop speaking button
+    stop_btn = tk.Button(input_inner, text="⏹", font=tkfont.Font(size=14),
+                         bg=ENTRY_BG, fg=RED,
+                         activebackground=BORDER, activeforeground=RED,
+                         relief=tk.FLAT, bd=0, padx=10, pady=8,
+                         cursor="hand2", command=stop_speaking,
+                         state=tk.DISABLED)   # disabled until AI speaks
+    stop_btn.pack(side=tk.LEFT, padx=(2, 2))
+
     mic_btn = tk.Button(input_inner, text="🎤", font=tkfont.Font(size=14),
                         bg=ENTRY_BG, fg=ACCENT2,
                         activebackground=BORDER, activeforeground=ACCENT2,
@@ -428,12 +465,11 @@ except:
     entry_font = tkfont.Font(family="Segoe UI", size=12)
     btn_font   = tkfont.Font(family="Segoe UI", size=12, weight="bold")
 
-# create StringVar AFTER tk.Tk() — set default to first model
 current_model = tk.StringVar()
 current_model.set(MODELS[0][1])
 
-# model_btn is a global so the picker popup can update its label
 model_btn = None
+stop_btn  = None
 
 build_key_screen()
 window.mainloop()

@@ -22,7 +22,7 @@ to powerful AI models — all powered by the Groq API.
 - Qwen 3 32B
 
 ## 🚀 How to Use (exe)
-1. Download AhmadAssistant.exe from Releases
+1. Download Basic Groq Assistant.exe from Releases
 2. Run it
 3. Enter your free Groq API key from console.groq.com
 4. Start chatting!
