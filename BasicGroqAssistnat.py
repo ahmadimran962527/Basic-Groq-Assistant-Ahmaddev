@@ -3,7 +3,7 @@ from tkinter import font as tkfont
 import threading
 import sounddevice as sd
 import numpy as np
-import speech_recognition as sr
+import speech_recognition as 
 import pyttsx3
 from groq import Groq
 
